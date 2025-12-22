@@ -21,7 +21,8 @@ def run_batch():
     db = MySQLClient()
 
     resolver = HospitalDomainResolver()
-    hospitals = db.fetch_unprocessed_hospitals(limit=10)
+    hospitals = db.fetch_unprocessed_hospitals(limit=2)
+
 
     if not hospitals:
         logger.info("No unprocessed hospitals found.")
@@ -30,64 +31,56 @@ def run_batch():
 
     # results = []
 
-    with open(INPUT_CSV, newline="", encoding="utf-8") as infile:
-        reader = csv.DictReader(infile)
+    for row in hospitals:
+        hid = row["id"]
+        name = row["name"]
+        state = row["state"]
+        
 
-        if "hospital_name" not in reader.fieldnames or "state" not in reader.fieldnames:
-            raise ValueError("CSV must contain columns: hospital_name,state")
+        logger.info(f"Resolving: {name}, {state}")
 
-        for row in reader:
-            hospital = row["hospital_name"].strip()
-            state = row["state"].strip()
+        try:
+            result = resolver.resolve(name, state)
+            
 
-            logger.info(f"Resolving: {hospital}, {state}")
+            db.save_result(
+                id=hid,
+                website=result["domain"],
+                websiteURL_ownership=result["ownership"],
+                website_confidence=result["confidence"],
+            )
 
-            try:
-                resolved = resolver.resolve(hospital, state)
+        except Exception as e:
+            logger.error(f"Failed: {name} | {e}")
 
-                results.append({
-                    "hospital_name": hospital,
-                    "state": state,
-                    "domain": resolved["domain"],
-                    "ownership": resolved["ownership"],
-                    "confidence": resolved["confidence"],
-                    "status": "success"
-                })
+            db.save_result(
+                id=hid,
+                website=result["domain"],
+                websiteURL_ownership=result["ownership"],
+                website_confidence=result["confidence"],
+            )
 
-            except Exception as e:
-                logger.error(f"Failed: {hospital}, {state} | {e}")
+        time.sleep(1)
 
-                results.append({
-                    "hospital_name": hospital,
-                    "state": state,
-                    "domain": "",
-                    "ownership": "",
-                    "confidence": "",
-                    "status": "failed"
-                })
-
-            # polite delay to avoid SERP rate limits
-            time.sleep(1)
-
-    write_results(results)
+    # write_results(results)
 
 
-def write_results(rows):
-    fieldnames = [
-        "hospital_name",
-        "state",
-        "domain",
-        "ownership",
-        "confidence",
-        "status"
-    ]
+# def write_results(rows):
+#     fieldnames = [
+#         "hospital_name",
+#         "state",
+#         "domain",
+#         "ownership",
+#         "confidence",
+#         "status"
+#     ]
 
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+#     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
+#         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+#         writer.writeheader()
+#         writer.writerows(rows)
 
-    logger.info(f"Batch complete. Results written to {OUTPUT_CSV}")
+    logger.info(f"Batch complete. Results written")
 
 
 if __name__ == "__main__":

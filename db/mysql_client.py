@@ -19,25 +19,28 @@ class MySQLClient:
 
     def save_result(
         self,
-        hospital_id,
-        domain,
-        ownership,
-        confidence,
-        status,
-        error_message=None
+        id,
+        website,
+        websiteURL_ownership,
+        website_confidence,
     ):
-        query = """
-        INSERT INTO hospital_domains
-        (hospital_id, domain, ownership, confidence, status, error_message)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        self.cursor.execute(
-            query,
-            (hospital_id, domain, ownership, confidence, status, error_message)
-        )
+        # query = """
+        # INSERT INTO hospitals
+        # (id, website, websiteURL_ownership, website_confidence)
+        # VALUES (%s, %s, %s, %s)
+        # """
+        # self.cursor.execute(
+        #     query,
+        #     (id, website, websiteURL_ownership, website_confidence)
+        # )
 
         update_query = """
-        UPDATE hospitals SET processed = TRUE WHERE id = %s
-        """
-        self.cursor.execute(update_query, (hospital_id,))
+                UPDATE hospitals
+                SET
+                    website = %s,
+                    websiteURL_ownership = %s,
+                    website_confidence = %s
+                WHERE id = %s
+                """
+        self.cursor.execute(update_query,  (website, websiteURL_ownership, website_confidence, id))
         self.conn.commit()

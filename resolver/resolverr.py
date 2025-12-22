@@ -19,7 +19,6 @@ class HospitalDomainResolver:
         for q in queries:
             serp_results.extend(SerpClient.search(q))
 
-        print(f"serp results ========================{serp_results}")
 
         domain_map = {}
         for idx, r in enumerate(serp_results):
@@ -32,7 +31,6 @@ class HospitalDomainResolver:
                 "snippet": r.get("snippet")
             })
         
-        print(f"domain map ======================= {domain_map}")
 
         candidates = list(domain_map.keys())
         
@@ -42,7 +40,6 @@ class HospitalDomainResolver:
         if not candidates:
             raise RuntimeError("No valid domains found")
         
-        print(f"candidates ======================== {candidates}")
 
 
         payload = {
@@ -61,11 +58,7 @@ class HospitalDomainResolver:
         }
 
         ai_result = call_ollama(payload)
-        # print(f"raw AI response ================================ {raw}")
-
-        # ai_result = json.loads(raw)
-
-        # print(f"AI result ======================================= {ai_result}")
+        
 
         selected = ai_result["selected_domain"]
         ai_conf = float(ai_result["confidence"])
