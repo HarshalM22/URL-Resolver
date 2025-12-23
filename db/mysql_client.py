@@ -24,15 +24,6 @@ class MySQLClient:
         websiteURL_ownership,
         website_confidence,
     ):
-        # query = """
-        # INSERT INTO hospitals
-        # (id, website, websiteURL_ownership, website_confidence)
-        # VALUES (%s, %s, %s, %s)
-        # """
-        # self.cursor.execute(
-        #     query,
-        #     (id, website, websiteURL_ownership, website_confidence)
-        # )
 
         update_query = """
                 UPDATE hospitals

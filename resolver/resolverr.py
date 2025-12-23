@@ -6,6 +6,11 @@ from resolver.ollama_reasoner import call_ollama
 from resolver.confidence import compute_final_confidence
 from utils.logger import logger
 from config.settings import CONFIDENCE_THRESHOLD
+from resolver.cms_client import CMSClient
+from resolver.match import select_matching_cms_record 
+
+
+
 
 class HospitalDomainResolver:
 
@@ -69,14 +74,36 @@ class HospitalDomainResolver:
             selected = candidates[0]
             ownership = "unknown"
             ai_conf = 0.7
-
+     
         serp_rank = domain_map[selected][0]["rank"]
         final_conf = compute_final_confidence(ai_conf, serp_rank, ownership)
+        
+        client = CMSClient()
+        content = client.fetch(selected)
+
+        print(f"CMS content for {selected} ======= {content}")
+        cms_record = None
+        if content:
+            cms_record = select_matching_cms_record(hospital_name, content)
+
+            if not cms_record:
+                logger.warning(
+                    f"No matching CMS record found for {hospital_name} on {selected}"
+                )
+        else:
+            logger.warning(f"No CMS content found for {selected}")
+
 
         return {
             "hospital": hospital_name,
             "state": state,
             "domain": selected,
             "ownership": ownership,
-            "confidence": round(final_conf, 3)
+            "confidence": round(final_conf, 3),
+            "cms": {
+                "matched": bool(cms_record),
+                "location_name": cms_record.get("location-name") if cms_record else None,
+                "mrf_url": cms_record.get("mrf-url") if cms_record else "Not Found",
+                "source_page": cms_record.get("source-page-url") if cms_record else None
+            }
         }

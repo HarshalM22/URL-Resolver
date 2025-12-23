@@ -10,10 +10,7 @@ from resolver.resolverr import HospitalDomainResolver
 from utils.logger import logger
 from db.mysql_client import MySQLClient
 
-
-
-# INPUT_CSV = "input.csv"
-# OUTPUT_CSV = "result.csv"
+from resolver.cms_client import CMSClient
 
 
 def run_batch():
@@ -21,13 +18,19 @@ def run_batch():
     db = MySQLClient()
 
     resolver = HospitalDomainResolver()
-    hospitals = db.fetch_unprocessed_hospitals(limit=2)
+    print(f"fetching hospitals from DB")
+    
+    hospitals = db.fetch_unprocessed_hospitals(limit=1)
 
+    print(f"hospitals fetched from DB: {hospitals}")
 
     if not hospitals:
         logger.info("No unprocessed hospitals found.")
         print("no unprocessed hospitals found.")
         return
+    
+  
+    
 
     # results = []
 
@@ -41,7 +44,7 @@ def run_batch():
 
         try:
             result = resolver.resolve(name, state)
-            
+
 
             db.save_result(
                 id=hid,
@@ -62,23 +65,6 @@ def run_batch():
 
         time.sleep(1)
 
-    # write_results(results)
-
-
-# def write_results(rows):
-#     fieldnames = [
-#         "hospital_name",
-#         "state",
-#         "domain",
-#         "ownership",
-#         "confidence",
-#         "status"
-#     ]
-
-#     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
-#         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
-#         writer.writeheader()
-#         writer.writerows(rows)
 
     logger.info(f"Batch complete. Results written")
 
