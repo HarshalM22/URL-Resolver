@@ -35,3 +35,19 @@ class MySQLClient:
                 """
         self.cursor.execute(update_query,  (website, websiteURL_ownership, website_confidence, id))
         self.conn.commit()
+
+    
+    def Save_mrfResult(self,hid,mrf_link,meta ):
+        
+        insert_query = """
+                INSERT INTO hospital_mrf_links
+                    (hospital_id, mrf_url, discovered_by, discovered_at, meta)
+                VALUES
+                    (%s, %s,%s, NOW(), %s)
+                """
+
+        self.cursor.execute(insert_query,(hid, mrf_link, "cms-hpt", meta))
+    
+        self.conn.commit()
+                     
+                    

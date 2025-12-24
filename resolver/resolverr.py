@@ -41,6 +41,11 @@ class HospitalDomainResolver:
         
         if len(candidates) > 3:
             candidates = candidates[:3]
+
+        # candidates = sorted(
+        #         domain_map.keys(),
+        #         key=lambda d: domain_map[d][0]["rank"]
+        #     )[:3]    
         
         if not candidates:
             raise RuntimeError("No valid domains found")
@@ -81,7 +86,7 @@ class HospitalDomainResolver:
         client = CMSClient()
         content = client.fetch(selected)
 
-        print(f"CMS content for {selected} ======= {content}")
+        print(f"CMS content for {selected}")
         cms_record = None
         if content:
             cms_record = select_matching_cms_record(hospital_name, content)
@@ -104,6 +109,8 @@ class HospitalDomainResolver:
                 "matched": bool(cms_record),
                 "location_name": cms_record.get("location-name") if cms_record else None,
                 "mrf_url": cms_record.get("mrf-url") if cms_record else "Not Found",
-                "source_page": cms_record.get("source-page-url") if cms_record else None
+                "source_page": cms_record.get("source-page-url") if cms_record else None,
+                "contact_phone": cms_record.get("contact-phone") if cms_record else None,
+                "contact_email": cms_record.get("contact-email") if cms_record else None 
             }
         }

@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -18,9 +19,10 @@ def run_batch():
     db = MySQLClient()
 
     resolver = HospitalDomainResolver()
+    
     print(f"fetching hospitals from DB")
     
-    hospitals = db.fetch_unprocessed_hospitals(limit=1)
+    hospitals = db.fetch_unprocessed_hospitals(limit=2)
 
     print(f"hospitals fetched from DB: {hospitals}")
 
@@ -53,15 +55,23 @@ def run_batch():
                 website_confidence=result["confidence"],
             )
 
+            cms = result.get("cms", {})
+
+            db.Save_mrfResult(
+                hid=hid,
+                mrf_link=cms.get("mrf_url"),
+                meta=json.dumps({
+                    "source_page": cms.get("source_page"),
+                    "contact_phone": cms.get("contact_phone"),
+                    "contact_email": cms.get("contact_email")
+                })
+            )
+
+            
+
         except Exception as e:
             logger.error(f"Failed: {name} | {e}")
 
-            db.save_result(
-                id=hid,
-                website=result["domain"],
-                websiteURL_ownership=result["ownership"],
-                website_confidence=result["confidence"],
-            )
 
         time.sleep(1)
 
