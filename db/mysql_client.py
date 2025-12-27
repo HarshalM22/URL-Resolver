@@ -9,9 +9,9 @@ class MySQLClient:
 
     def fetch_unprocessed_hospitals(self, limit=10):
         query = """
-        SELECT id, name, state
+        SELECT id, name, state, city
         FROM hospitals
-        WHERE website is null
+        WHERE website is null or website =''
         LIMIT %s
         """
         self.cursor.execute(query, (limit,))
@@ -23,6 +23,7 @@ class MySQLClient:
         website,
         websiteURL_ownership,
         website_confidence,
+        cms_txt_content 
     ):
 
         update_query = """
@@ -30,10 +31,11 @@ class MySQLClient:
                 SET
                     website = %s,
                     websiteURL_ownership = %s,
-                    website_confidence = %s
+                    website_confidence = %s,
+                    cms_txt_content = %s 
                 WHERE id = %s
                 """
-        self.cursor.execute(update_query,  (website, websiteURL_ownership, website_confidence, id))
+        self.cursor.execute(update_query,  (website, websiteURL_ownership, website_confidence,cms_txt_content, id))
         self.conn.commit()
 
     

@@ -8,7 +8,7 @@ CMS_PATH = "/cms-hpt.txt"
 
 class CMSClient:
     @staticmethod
-    def fetch(domain: str, timeout: int = 60) -> Optional[Dict[str, Any]]:
+    def fetch(domain: str, timeout: int = 300) -> Optional[Dict[str, Any]]:
         """
         Fetches and parses CMS hospital price transparency data.
 
@@ -34,10 +34,12 @@ class CMSClient:
                 logger.warning(
                     f"CMS file not found ({resp.status_code}) for {domain}"
                 )
-                return None
+                return []
 
             # Decode safely (CMS files often have odd encoding)
             content = resp.content.decode("utf-8", errors="ignore")
+
+            status = resp.status_code
 
             records = parse_cms_hpt_records(content)
 
@@ -45,7 +47,7 @@ class CMSClient:
 
             if not records:
                 logger.warning(f"No records found in CMS file for {domain}")
-                return None
+                return []
 
             return records
 
@@ -54,34 +56,32 @@ class CMSClient:
 
         except requests.Timeout:
             logger.error(f"Timeout fetching CMS file for {domain}")
-            return None
+            return []
 
         except (requests.ConnectionError, json.JSONDecodeError) as e:
             logger.error(f"Error fetching CMS file for {domain}: {e}")
-            return None
+            return []
 
 
 
 def parse_cms_hpt_records(content: str) -> list[dict]:
-        records = []
-        current = {}
+    records = []
+    current = {}
 
-        for line in content.splitlines():
-            line = line.strip()
+    for line in content.splitlines():
+        line = line.strip()
 
-            # Blank line → commit record
-            if not line:
-                if current:
-                    records.append(current)
-                    current = {}
-                continue
+        if not line:
+            if current:
+                records.append(current)
+                current = {}
+            continue
 
-            if ":" in line:
-                key, value = line.split(":", 1)
-                current[key.strip()] = value.strip()
+        if ":" in line:
+            key, value = line.split(":", 1)
+            current[key.strip()] = value.strip()
 
-        # Append last record if present
-        if current:
-            records.append(current)
+    if current:
+        records.append(current)
 
-        return records
+    return records
