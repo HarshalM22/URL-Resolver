@@ -10,7 +10,6 @@ def normalize_name(name: str) -> str:
     return name
 
 
-
 def select_matching_cms_record(
     hospital_name: str,
     cms_records: list[dict]

@@ -22,7 +22,7 @@ def run_batch():
     
     print(f"fetching hospitals from DB")
     
-    hospitals = db.fetch_unprocessed_hospitals(limit=2 )
+    hospitals = db.fetch_unprocessed_hospitals(limit=1)
 
     print(f"hospitals fetched from DB: {hospitals}")
 
