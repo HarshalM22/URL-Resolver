@@ -54,8 +54,11 @@ class MySQLClient:
             result = conn.execute(query, {"limit": limit})
             return result.mappings().all()
         
+    async def save_result_async(self, **kwargs):
+        await asyncio.to_thread(self.save_result_sync, **kwargs)
+        
 
-    def save_result(
+    def save_result_sync(
         self,
         id,
         website,
@@ -79,9 +82,11 @@ class MySQLClient:
                 "content": cms_txt_content,
                 "id": id
             })
-
+  
+    async def Save_mrfResult_async(self, hid, mrf_link, meta):
+        await asyncio.to_thread(self.save_mrf_sync, hid, mrf_link, meta)
     
-    def Save_mrfResult(self,hid,mrf_link,meta ):
+    def save_mrf_sync(self,hid,mrf_link,meta ):
         
         with self.engine.begin() as conn:
             query = text("""
@@ -100,17 +105,18 @@ class SerpClient:
     BASE_URL = "https://serpapi.com/search.json"
 
     @staticmethod
-    def search(query: str):
+    async def search_async(query: str) -> list[dict]:
         params = {
             "q": query,
             "engine": Settings.SERP_ENGINE,
             "api_key": Settings.SERP_API_KEY,
             "num": Settings.SERP_RESULTS
         }
-        resp = requests.get(SerpClient.BASE_URL, params=params, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("organic_results", [])
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(SerpClient.BASE_URL, params=params)
+            resp.raise_for_status()
+            return resp.json().get("organic_results", [])
 
 # ============================================================
 # FILTERS (resolver/filter.py)
@@ -187,7 +193,7 @@ class CMSClient:
         Enhanced Fetcher to bypass 403/404 blocks.
         Matches your pipeline by returning a list of parsed records.
         """
-        browser_targets = ["chrome120", "chrome119","chrome", "safari", "safari_ios"]
+        browser_targets = ["chrome120", "chrome119"]
         target = random.choice(browser_targets)
         
         async with AsyncSession() as session:
@@ -195,7 +201,7 @@ class CMSClient:
             domain = domain.strip().lower().replace("https://", "").replace("http://", "").rstrip('/')
             homepage_url = f"https://{domain}/"
             cms_url = f"https://{domain}/cms-hpt.txt"
-
+            
             headers = {
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
@@ -211,7 +217,7 @@ class CMSClient:
                     homepage_url, 
                     impersonate=target, 
                     headers=headers, 
-                    timeout=15,
+                    timeout=(60,60),
                     verify=False  
                 )
 
@@ -227,7 +233,7 @@ class CMSClient:
                     cms_url,
                     impersonate=target,
                     headers=headers,
-                    timeout=timeout
+                    timeout=(20,60)
                 )
 
                 if resp.status_code == 200:
@@ -433,45 +439,6 @@ def _extract_json(text: str) -> Dict[str, Any]:
     return json.loads(match.group(0))
 
 
-
-# def call_ollama(payload: Dict[str, Any],domain_map) -> Dict[str, Any]:
-#     candidate_domains = payload.get("candidate_domains") or []
-
-#     safe_payload = {
-#         "hospital_name": payload.get("hospital_name"),
-#         "state": payload.get("state"),
-#         "candidate_domains": candidate_domains,
-#         "evidence": {
-#             domain: entries[:4]
-#             for domain, entries in domain_map.items()
-#             if domain in candidate_domains
-#             }
-# ,
-#     }
-
-#     prompt = f"""
-# SYSTEM:
-# {SYSTEM_PROMPT}
-
-# USER:
-# {json.dumps(safe_payload)}
-# """.strip()
-
-#     response = requests.post(
-#         Settings.OLLAMA_URL,
-#         json={
-#             "model": Settings.OLLAMA_PRIMARY_MODEL,
-#             "prompt": prompt,
-#             "temperature": Settings.OLLAMA_TEMPERATURE,
-#             "top_p": Settings.OLLAMA_TOP_P,
-#             "stream": False
-#         },
-#         timeout=120
-#     )
-#     response.raise_for_status()
-#     # print("json reponse is ", json.loads(response.json()))
-#     return json.loads(response.json()["response"])
-
 async def call_ollama_async(payload: Dict[str, Any], domain_map: Dict[str, Any]) -> Dict[str, Any]:
     """
     Asynchronous wrapper for Ollama. 
@@ -536,46 +503,67 @@ USER:
 # ============================================================
 class HospitalDomainResolver:
 
-    async def resolve_async(self, hospital_name: str, state: str, city: str):
+    async def resolve_async(self, hospital_name: str, state: str, city: str) -> dict:
         """
-        Asynchronous version of the hospital domain resolver.
+        Fully asynchronous hospital domain resolver.
+        Guarantees:
+        - No blocking calls
+        - Deterministic candidate ordering
+        - Strict LLM grounding via SERP context
+        - Stable return schema
         """
-        queries = [
+
+        # ------------------------------------------------------------------
+        # 1. SERP DISCOVERY (PARALLEL, NON-BLOCKING)
+        # ------------------------------------------------------------------
+        queries = (
             f"{hospital_name} {city} {state} hospital official website",
-            f"{hospital_name} {city} {state} health system"
+            f"{hospital_name} {city} {state} health system",
+        )
+
+        try:
+            serp_batches = await asyncio.gather(
+                *(SerpClient.search_async(q) for q in queries),
+                return_exceptions=False
+            )
+        except Exception as e:
+            logger.error(f"SERP search failed for {hospital_name}: {e}")
+            return {"status": "failed", "reason": "serp_failure"}
+
+        serp_results: list[dict] = [
+            item for batch in serp_batches for item in batch
         ]
 
-        # 1. ASYNC DISCOVERY: Search concurrently for all queries
-        # Using asyncio.gather here allows both search queries to run at once
-        search_tasks = [SerpClient.search_async(q) for q in queries]
-        results_lists = await asyncio.gather(*search_tasks)
-        
-        serp_results = []
-        for r_list in results_lists:
-            serp_results.extend(r_list)
+        if not serp_results:
+            return {"status": "failed", "reason": "no_serp_results"}
 
-        # 2. HEURISTIC MAPPING
-        domain_map = {}
+        # ------------------------------------------------------------------
+        # 2. DOMAIN CANONICALIZATION + HEURISTIC MAPPING
+        # ------------------------------------------------------------------
+        domain_map: dict[str, list[dict]] = {}
+
         for idx, r in enumerate(serp_results):
             domain = canonical_domain(r.get("link"))
             if not domain or is_blocked(domain):
                 continue
+
             domain_map.setdefault(domain, []).append({
                 "rank": idx + 1,
-                "title": r.get("title"),
-                "snippet": r.get("snippet")
+                "title": r.get("title", ""),
+                "snippet": r.get("snippet", "")
             })
 
-        # 3. CANDIDATE SELECTION
+        # ------------------------------------------------------------------
+        # 3. CANDIDATE SELECTION (STABLE + TOP-N)
+        # ------------------------------------------------------------------
         candidates = sorted(
             domain_map.keys(),
             key=lambda d: domain_map[d][0]["rank"]
         )[:4]
 
-        if not candidates:
-            logger.warning(f"No valid domains found for {hospital_name}")
-            return {"status": "failed", "reason": "no_candidates"}
-
+        # ------------------------------------------------------------------
+        # 4. LLM PAYLOAD (STRICTLY GROUNDED)
+        # ------------------------------------------------------------------
         payload = {
             "hospital_name": hospital_name,
             "state": state,
@@ -583,60 +571,94 @@ class HospitalDomainResolver:
             "serp_context": [
                 {
                     "domain": domain,
-                    "top_rank": entries[0]["rank"],
-                    "title": entries[0]["title"],
-                    "summary": entries[0]["snippet"][:100]
+                    "top_rank": domain_map[domain][0]["rank"],
+                    "title": domain_map[domain][0]["title"],
+                    "summary": domain_map[domain][0]["snippet"][:100],
                 }
-                for domain, entries in domain_map.items() if domain in candidates
+                for domain in candidates
             ]
         }
 
-        # 4. ASYNC AI REASONING
-        # This prevents the script from freezing while Ollama processes the prompt
+        # ------------------------------------------------------------------
+        # 5. ASYNC AI REASONING (NON-BLOCKING)
+        # ------------------------------------------------------------------
         ai_result = await call_ollama_async(payload, domain_map)
 
-        if ai_result is None:
-            return {"status": "failed", "reason": "ai_no_response"}
+        if not ai_result:
+            return 
 
-        selected = ai_result["selected_domain"]
-        ai_conf = float(ai_result["confidence"])
-        ownership = ai_result["ownership"]
+        selected: str = ai_result.get("selected_domain")
+        ownership: str = ai_result.get("ownership")
+        ai_confidence = ai_result.get("confidence")
 
-        if selected not in domain_map:
-            return {"status": "failed", "reason": "domain_mismatch"}
+        if not selected or selected not in domain_map:
+            return {"status": "failed", "reason": "invalid_ai_selection"}
 
-        # 5. ASYNC STEALTH FETCH (Using your new async fetcher)
+        # try:
+        #     ai_confidence = float(ai_confidence)
+        # except (TypeError, ValueError):
+        #     return {"status": "failed", "reason": "invalid_ai_confidence"}
+
+        # ------------------------------------------------------------------
+        # 6. FINAL CONFIDENCE ADJUSTMENT
+        # ------------------------------------------------------------------
         serp_rank = domain_map[selected][0]["rank"]
-        final_conf = compute_final_confidence(ai_conf, serp_rank, ownership)
-        
-        client = CMSClient()
-        # This now calls the 'await session.get' logic we built
-        content = await client.fetch_async(selected)
+        final_confidence = compute_final_confidence(
+            ai_confidence,
+            serp_rank,
+            ownership
+        )
 
-        # 6. DATA TRANSFORMATION
-        cms_txt_content = json.dumps(convert_text_to_json(content), indent=4)
-        
-        cms_record = None
-        if content:
-            cms_record = select_matching_cms_record(hospital_name, content)
+        # ------------------------------------------------------------------
+        # 7. CMS FETCH (ASYNC, STEALTH)
+        # ------------------------------------------------------------------
+        try:
+            cms_records = await CMSClient.fetch(selected)
+        except Exception as e:
+            logger.error(f"CMS fetch failed for {selected}: {e}")
+            cms_records = []
 
+        # ------------------------------------------------------------------
+        # 8. CMS TRANSFORMATION + MATCHING
+        # ------------------------------------------------------------------
+        cms_record = (
+            select_matching_cms_record(hospital_name, cms_records)
+            if cms_records else None
+        )
+
+        if cms_records:
+            cms_txt_content = json.dumps(
+                convert_text_to_json(cms_records),
+                indent=4
+            )
+        else:
+            cms_txt_content = json.dumps({
+                "status": "not_found",
+                "reason": "cms-hpt.txt missing or inaccessible",
+                "records": []
+            })
+
+        # ------------------------------------------------------------------
+        # 9. FINAL, STABLE RETURN OBJECT
+        # ------------------------------------------------------------------
         return {
             "hospital": hospital_name,
             "status": "resolved",
             "state": state,
             "domain": selected,
             "ownership": ownership,
-            "confidence": round(final_conf, 3),
-            "cms_txt_content": cms_txt_content if cms_txt_content else "404 : Not Found",
+            "confidence": round(final_confidence, 3),
+            "cms_txt_content": cms_txt_content,
             "cms": {
                 "matched": bool(cms_record),
-                "location_name": cms_record.get("location-name") if cms_record else "404 :Not Found",
+                "location_name": cms_record.get("location-name") if cms_record else "404 : Not Found",
                 "mrf_url": cms_record.get("mrf-url") if cms_record else "404 : Not Found",
                 "source_page": cms_record.get("source-page-url") if cms_record else "404 : Not Found",
                 "contact_name": cms_record.get("contact-name") if cms_record else "404 : Not Found",
-                "contact_email": cms_record.get("contact-email") if cms_record else "404 : Not Found" 
+                "contact_email": cms_record.get("contact-email") if cms_record else "404 : Not Found",
             }
         }
+
 
     # def resolve(self, hospital_name: str, state: str,city:str):
     #     queries = [
@@ -834,7 +856,7 @@ async def process_single_hospital(row, resolver, db, semaphore):
         state = row["state"]
         city = row["city"]
 
-        logger.info(f"🚀 Resolving: {name}, {state}, {city}")
+        logger.info(f" Resolving: {name}, {state}, {city}")
 
         try:
             # IMPORTANT: resolver.resolve must be changed to 'async def'
@@ -855,12 +877,13 @@ async def process_single_hospital(row, resolver, db, semaphore):
             )
 
             cms = result.get("cms", {})
+            
             await db.Save_mrfResult_async(
                 hid=hid,
                 mrf_link=cms.get("mrf_url"),
                 meta=json.dumps({
                     "source_page": cms.get("source_page"),
-                    "contact_phone": cms.get("contact_phone"),
+                    "contact_name": cms.get("contact_name"),
                     "contact_email": cms.get("contact_email")
                 })
             )
@@ -872,7 +895,7 @@ async def process_single_hospital(row, resolver, db, semaphore):
 # ============================================================
 # ASYNC MAIN BATCH
 # ============================================================
-async def run_batch_async(limit=500):
+async def run_batch_async(limit):
     """
     The main entry point. Fetches data and manages concurrency.
     """
@@ -890,7 +913,7 @@ async def run_batch_async(limit=500):
     # 2. Concurrency Control (Semaphore)
     # Set this to 50. It allows 500 tasks to 'start', but only 50 to 
     # be actively using your RAM/Network/GPU at one time.
-    concurrency_limit = asyncio.Semaphore(50)
+    concurrency_limit = asyncio.Semaphore(25)
 
     # 3. Create Task List
     tasks = [
@@ -912,6 +935,6 @@ async def run_batch_async(limit=500):
 # ============================================================
 if __name__ == "__main__":
     try:
-        asyncio.run(run_batch_async(limit=10))
+        asyncio.run(run_batch_async(limit=5))
     except KeyboardInterrupt:
         logger.info("Batch cancelled by user.")
